@@ -1,0 +1,742 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+```{r}
+#install.packages("matlib")
+#install.packages("rsample")
+#install.packages("car")
+```
+
+#importing needed liberary
+
+```{r}
+library(matlib)
+library(ggplot2)
+library(rsample)
+library(MASS)
+library(car)
+```
+
+# Import data set and prepare a structure for EDA
+
+```{r}
+# Ensure data is loaded
+data <- read.csv("D:/smaran/Msc Data Science - AI/Stats/assignment/dataset.csv")
+
+# Rename x2 to y, for ease
+names(data)[names(data) == "x2"] <- "y"
+
+# Add time column as first column
+data <- cbind(time = 1:nrow(data), data)
+
+head(data)
+```
+
+# Begin EDA with time series plot
+
+```{r}
+
+library(ggplot2)
+# Plot each variable over time
+ggplot(data, aes(x=time, y=x1)) + geom_line(color="steelblue") +
+  labs(title="Time Series of x1 (Ambient Temperature)", y="x1")
+ggplot(data, aes(x=time, y=x3)) + geom_line(color="steelblue") +
+  labs(title="Time Series of x3 (Exhaust Vacuum)", y="x3")
+ggplot(data, aes(x=time, y=x4)) + geom_line(color="steelblue") +
+  labs(title="Time Series of x4 (Ambient Pressure)", y="x4")
+ggplot(data, aes(x=time, y=x5)) + geom_line(color="steelblue") +
+  labs(title="Time Series of x5 (Relative Humidity)", y="x5")
+ggplot(data, aes(x=time, y=y)) + geom_line(color="tomato") +
+  labs(title="Time Series of y (Power Output)", y="y")
+```
+
+# Histogram
+
+```{r}
+# Histograms of each variable
+ggplot(data, aes(x=x1)) + 
+  geom_histogram(bins=30, fill="skyblue", color="black") + 
+  ggtitle("Distribution of x1 (Temperature)") +
+  xlab("x1 (Temp °C)") + ylab("Frequency")
+
+ggplot(data, aes(x=x3)) + 
+  geom_histogram(bins=30, fill="skyblue", color="black") + 
+  ggtitle("Distribution of x3 (Humidity)") +
+  xlab("x3 (Humidity %)") + ylab("Frequency")
+
+ggplot(data, aes(x=x4)) + 
+  geom_histogram(bins=30, fill="skyblue", color="black") + 
+  ggtitle("Distribution of x4 (Pressure)") +
+  xlab("x4 (Pressure mbar)") + ylab("Frequency")
+
+ggplot(data, aes(x=x5)) + 
+  geom_histogram(bins=30, fill="skyblue", color="black") + 
+  ggtitle("Distribution of x5 (Exhaust Vacuum)") +
+  xlab("x5 (Vacuum cm Hg)") + ylab("Frequency")
+
+ggplot(data, aes(x=y)) + 
+  geom_histogram(bins=30, fill="tomato", color="black") + 
+  ggtitle("Distribution of y (Energy Output)") +
+  xlab("y (Output MW)") + ylab("Frequency")
+
+
+```
+# Density plot for raw features
+
+```{r}
+# Select only the input variables
+X_orig <- data[, c("x1", "x3", "x4", "x5")]
+
+# Build a list of density objects
+dens_list <- lapply(X_orig, density)
+
+# Determine combined x & y limits so everything fits nicely
+xlim_all <- range(sapply(dens_list, function(d) range(d$x)))
+ylim_all <- range(sapply(dens_list, function(d) range(d$y)))
+
+# Pick as many distinct colours as variables
+cols <- rainbow(length(dens_list))
+
+# Empty plotting canvas
+plot(NA, type = "n",
+     xlim = xlim_all, ylim = ylim_all,
+     main = "Overlaid Density Curves (raw input features)",
+     xlab = "Original value", ylab = "Density")
+
+# Add each curve
+for (i in seq_along(dens_list)) {
+  lines(dens_list[[i]], col = cols[i], lwd = 2)
+}
+
+# Legend
+legend("topright", legend = names(X_orig),
+       col = cols, lwd = 2, bty = "n")
+
+
+
+
+density_of_X=density(X_orig[,1])
+plot(density_of_X,main = "Density plot of input signal X")
+
+hist(X_orig[,1],freq = FALSE,main = "Density")
+lines(density_of_X,lwd=2,col="brown")
+rug(jitter(X_orig[,1]))
+
+
+```
+
+# Correlation and Scatter Plot
+
+```{r}
+
+# Exclude 'time' column
+data_no_time <- data[, !(names(data) %in% "time")]
+
+# Compute correlation matrix for all variables
+corr_matrix <- round(cor(data_no_time), 3)
+print(corr_matrix)
+
+
+# Scatter plot matrix for all variables
+pairs(data_no_time, main="Scatter Plot Matrix of Variables",
+      pch=20, col=rgb(0, 0, 1, 0.3))
+
+
+```
+
+# Checking the possible existence of multicollinarity for any one polynomial model
+
+```{r}
+# check for multicollinarity
+
+Y <- data[, c("y")]
+
+# 1. Count Duplicate Rows
+duplicate_count <- sum(duplicated(X_orig))
+cat("Number of duplicate rows:", duplicate_count, "\n")
+
+# 2. Create Model 4 design matrix
+X_model4 <- cbind(1, X_orig[,"x4"], X_orig[,"x3"]^2, X_orig[,"x5"]^3)
+
+# 3. Check Rank of X_model4
+model4_rank <- qr(X_model4)$rank
+expected_rank <- ncol(X_model4)
+cat(" Rank of X_model4:", model4_rank, "of", expected_rank, "\n")
+
+# 4. Check Condition Number
+condition_number <- kappa(t(X_model4) %*% X_model4)
+cat("Condition number of X'X:", condition_number, "\n")
+if (condition_number > 10000) {
+  cat("High condition number: potential multicollinearity or singularity risk.\n")
+}
+
+# 5. Check VIF
+X_df <- as.data.frame(X_model4)
+colnames(X_df) <- c("Intercept", "x4", "x3_sq", "x5_cu")
+lm_model <- lm(Y ~ . -1, data = X_df)  # -1 to omit intercept (already included)
+cat("Variance Inflation Factors (VIF):\n")
+vif_res <- vif(lm_model)
+print(vif_res)
+
+if (any(vif_res > 10)) {
+  cat("\n High VIF: High multicollinearity detected.\n")
+} else {
+  cat("\n All VIFs are below 10; multicollinearity looks acceptable.\n")
+}
+
+#check after scaling
+
+# 1. Scale then build the same design matrix
+Xs <- scale(X_orig)                                   
+X_model4s <- cbind(1, Xs[, "x4"], Xs[, "x3"]^2, Xs[, "x5"]^3)
+
+# 2. Condition number
+kappa_s <- kappa(t(X_model4s) %*% X_model4s)
+cat("Scaled condition number:", kappa_s, "\n")   
+
+# 3. VIF after scaling
+library(car)
+lm_scaled <- lm(Y ~ . -1, data = as.data.frame(X_model4s))
+vif_res_scaled <- vif(lm_scaled)
+print(vif_res_scaled)
+
+if (any(vif_res_scaled > 10)) {
+  cat("\n High VIF: High multicollinearity detected.\n")
+} else {
+  cat("\n All VIFs are below 10; multicollinearity looks acceptable.\n")
+}
+
+```
+
+# Checking and removing exact duplicate rows to remove biased model fitting and possibility of inflated metrics
+
+```{r}
+# Check number of duplicate rows
+num_duplicates <- sum(duplicated(data[, !(names(data) %in% "time")]))
+cat("Number of duplicate rows:", num_duplicates, "\n")
+
+#Remove duplicates based on content only
+data <- data[!duplicated(data[, !(names(data) %in% "time")]), ]
+data$time <- 1:nrow(data)  # Reset time
+
+# Confirm removal
+cat("Rows after removing duplicates:", nrow(data), "\n")
+
+```
+
+# Separating input and output variables
+
+```{r}
+
+# Separate feature matrix as X and output as Y, for ease
+X <- data[, c("x1", "x3", "x4", "x5")]
+Y <- data[, c("y")]
+
+head(X)
+head(Y)
+```
+
+# Standardization using z-score scale
+
+```{r}
+# Normalization function: using z-score
+
+z_score_normalize <- function(X) {
+  X_mean <- apply(X, 2, mean)
+  X_sd <- apply(X, 2, sd)
+  X_scaled <- sweep(X, 2, X_mean, "-")
+  X_scaled <- sweep(X_scaled, 2, X_sd, "/")
+  
+  list(scaled_data = X_scaled, mean = X_mean, sd = X_sd)
+}
+
+# Normalize
+norm_result <- z_score_normalize(X)
+
+# Access scaled data
+X_scaled <- norm_result$scaled_data
+head(X_scaled)
+
+#X_scaled <- scale(X)
+```
+
+# Density plot of standardized inputs
+
+```{r}
+# Create empty plot with proper range
+plot(density(X_scaled[, 1]), type = "n",
+     main = "Overlaid Density Curves (scaled features)",
+     xlab = "Scaled value", ylab = "Density")
+
+cols <- c("blue", "red", "forestgreen", "purple")
+
+for (i in seq_along(colnames(X_scaled))) {
+  lines(density(X_scaled[, i]), col = cols[i], lwd = 2)
+}
+
+legend("topright", legend = colnames(X_scaled),
+       col = cols, lwd = 2, bty = "n")
+
+
+
+density_of_X=density(X_scaled[, 1])
+plot(density_of_X,main = "Density plot of input signal X")
+
+hist(X_scaled[, 1],freq = FALSE,main = "Density")
+lines(density_of_X,lwd=2,col="brown")
+rug(jitter(X_scaled[,1]))
+
+
+```
+
+
+
+# Task 2
+
+# Calculating ones for binding the data
+
+```{r}
+ones = matrix(1 , length(X_scaled)/4,1)
+```
+
+# Task 2.1
+
+# Calculating thetahat of each candidate model
+
+```{r}
+
+# function for building model matrices and calculating parameter estimates (thetahat)
+fit_regression_model <- function(X_scaled, Y, include_intercept=TRUE, transformations=list()){
+  
+  # Prepare intercept (ones) if needed
+  if (include_intercept) {
+    X_matrix <- matrix(1, nrow=nrow(X_scaled), ncol=1)
+  } else {
+    X_matrix <- matrix(nrow=nrow(X_scaled), ncol=0)
+  }
+  
+  # Apply transformations and bind columns
+  for (transformation in transformations) {
+    X_matrix <- cbind(X_matrix, with(as.data.frame(X_scaled), eval(parse(text=transformation))))
+  }
+  
+  # Compute thetahat
+  thetahat <- solve(t(X_matrix) %*% X_matrix) %*% t(X_matrix) %*% Y
+  
+  # Check rank for multicollinearity issues
+  model_rank <- qr(X_matrix)$rank
+  full_rank <- ncol(X_matrix)
+  
+  if(model_rank < full_rank) warning("Possible multicollinearity or singularity issue detected.")
+
+  return(list(thetahat=thetahat, X_matrix=X_matrix, rank=model_rank))
+}
+
+#Building Model 1
+model1 <- fit_regression_model(X_scaled, Y, transformations=c("x4", "x3^2"))
+#model1_matrix
+X_model1<-model1$X_matrix
+head(X_model1)
+#Calculating thetahat of Model 1
+Model1_thetahat <- model1$thetahat
+Model1_thetahat
+
+#Building Model 2
+model2 <- fit_regression_model(X_scaled, Y, transformations=c("x4", "x3^2", "x5"))
+#model2_matrix
+X_model2<-model2$X_matrix
+head(X_model2)
+#Calculating thetahat of Model 2
+Model2_thetahat <- model2$thetahat
+Model2_thetahat
+
+#Building Model 3
+model3 <- fit_regression_model(X_scaled, Y, FALSE, transformations=c("x3", "x4", "x5^3"))
+#model3_matrix
+X_model3<-model3$X_matrix
+head(X_model3)
+#Calculating thetahat of Model 3
+Model3_thetahat <- model3$thetahat
+Model3_thetahat
+
+#Building Model 4
+model4 <- fit_regression_model(X_scaled, Y, transformations=c("x4", "x3^2", "x5^3"))
+#model4_matrix
+X_model4<-model4$X_matrix
+head(X_model4)
+#Calculating thetahat of Model 4
+Model4_thetahat <- model4$thetahat
+Model4_thetahat
+
+#Building Model 4
+model5 <- fit_regression_model(X_scaled, Y, transformations=c("x4", "x1^2", "x3^2"))
+#model5_matrix
+X_model5<-model5$X_matrix
+head(X_model5)
+#Calculating thetahat of Model 5
+Model5_thetahat <- model5$thetahat
+Model5_thetahat
+
+
+```
+
+# printing value of theta of each model
+
+```{r}
+#model1
+Model1_thetahat
+t(Model1_thetahat)
+#model 2
+Model2_thetahat
+t(Model2_thetahat)
+#model 3
+Model3_thetahat
+t(Model3_thetahat)
+#model 4
+Model4_thetahat
+t(Model4_thetahat)
+#model 5
+Model5_thetahat
+t(Model5_thetahat)
+```
+
+# Task 2.2
+
+#Calculating Y-hat and RSS for each model
+
+```{r}
+
+#function to calculate Y-hat and RSS
+calculate_predictions_rss <- function(X_matrix, thetahat, Y) {
+  Y_hat <- X_matrix %*% thetahat
+  RSS <- sum((Y - Y_hat)^2)
+  list(Y_hat = Y_hat, RSS = RSS)
+}
+
+#calculating predictions and RSS for each model
+Pred_Model_1 <- calculate_predictions_rss(X_model1, Model1_thetahat, Y)
+Pred_Model_2 <- calculate_predictions_rss(X_model2, Model2_thetahat, Y)
+Pred_Model_3 <- calculate_predictions_rss(X_model3, Model3_thetahat, Y)
+Pred_Model_4 <- calculate_predictions_rss(X_model4, Model4_thetahat, Y)
+Pred_Model_5 <- calculate_predictions_rss(X_model5, Model5_thetahat, Y)
+
+# printing values for model 1
+head(Pred_Model_1$Y_hat)
+head(Pred_Model_1$RSS)
+
+```
+
+#printing RSS value
+
+```{r}
+model1 <- c(Pred_Model_1$RSS)
+model2 <- c(Pred_Model_2$RSS)
+model3 <- c(Pred_Model_3$RSS)
+model4 <- c(Pred_Model_4$RSS)
+model5 <- c(Pred_Model_5$RSS)
+
+dfRSS <- data.frame(model1, model2,model3,model4,model5)
+dfRSS
+```
+
+#Task 2.3 Calculating likelihood and Variance of each model
+
+```{r}
+#function to compute variance and log-likelihood
+
+compute_likelihood <- function(RSS, N) {
+  variance <- RSS / (N - 1)
+  log_likelihood <- - (N / 2) * log(2 * pi) - (N / 2) * log(variance) - (RSS / (2 * variance))
+  list(variance = variance, log_likelihood = log_likelihood)
+}
+
+N <- length(Y)
+
+likelihood1 <- compute_likelihood(Pred_Model_1$RSS, N)
+likelihood2 <- compute_likelihood(Pred_Model_2$RSS, N)
+likelihood3 <- compute_likelihood(Pred_Model_3$RSS, N)
+likelihood4 <- compute_likelihood(Pred_Model_4$RSS, N)
+likelihood5 <- compute_likelihood(Pred_Model_5$RSS, N)
+```
+
+#printing variance and likelihood values
+
+```{r}
+likelihood_matrix <- sapply(
+  list(model1 = likelihood1, model2 = likelihood2, model3 = likelihood3, model4 = likelihood4, model5 = likelihood5),
+  function(x) c(Variance = x$variance, LogLikelihood = x$log_likelihood)
+)
+
+# Convert to data frame for printing
+likelihood_df <- as.data.frame(likelihood_matrix)
+likelihood_df
+```
+
+
+# Task 2.4
+
+# Calculating AIC And BIC of each model
+
+```{r}
+
+#function to compute AIC and BIC
+compute_aic_bic <- function(thetahat, log_likelihood, N) {
+  k <- length(thetahat)
+  aic <- 2 * k - 2 * log_likelihood
+  bic <- k * log(N) - 2 * log_likelihood
+  c(AIC = aic, BIC = bic)
+}
+
+# find for each model
+aic_bic_matrix <- sapply(
+  list(
+    model1 = compute_aic_bic(Model1_thetahat, likelihood1$log_likelihood, N),
+    model2 = compute_aic_bic(Model2_thetahat, likelihood2$log_likelihood, N),
+    model3 = compute_aic_bic(Model3_thetahat, likelihood3$log_likelihood, N),
+    model4 = compute_aic_bic(Model4_thetahat, likelihood4$log_likelihood, N),
+    model5 = compute_aic_bic(Model5_thetahat, likelihood5$log_likelihood, N)
+  ),
+  identity
+)
+
+
+#print values
+
+#give name to 1st row and column
+rownames(aic_bic_matrix) <- c("AIC", "BIC")
+colnames(aic_bic_matrix) <- paste0("Model", 1:5)
+
+# Print AIC & BIC for all models
+print(aic_bic_matrix)
+
+```
+
+## Task 2.5 calculating error plotting normal/gaussian distibution of each plot
+
+```{r}
+# List of model residuals
+model_errors <- list(
+  model1 = Y - Pred_Model_1$Y_hat,
+  model2 = Y - Pred_Model_2$Y_hat,
+  model3 = Y - Pred_Model_3$Y_hat,
+  model4 = Y - Pred_Model_4$Y_hat,
+  model5 = Y - Pred_Model_5$Y_hat
+)
+
+# Colors for points and lines
+point_colors <- c("blue", "red", "green", "purple", "orange")
+line_color  <- "black"
+
+# Set layout: 1 row x 1 col
+par(mfrow = c(1, 1))
+
+# Loop through and plot each QQ plot
+for (i in 1:5) {
+  qqnorm(model_errors[[i]], main = paste("QQ Plot - Model", i),
+         col = point_colors[i], pch = 16)
+  qqline(model_errors[[i]], col = line_color, lwd = 2)
+}
+
+```
+# calulate R-squared and RMSE for each model
+
+```{r}
+# Compute R-squared and RMSE for each model
+compute_r2_rmse <- function(actual, predicted) {
+  residuals <- actual - predicted
+  ss_total <- sum((actual - mean(actual))^2)
+  ss_res <- sum(residuals^2)
+  r_squared <- 1 - ss_res / ss_total
+  rmse <- sqrt(mean(residuals^2))
+  list(R_squared = r_squared, RMSE = rmse)
+}
+
+# List of model results
+model_preds <- list(
+  model1 = Pred_Model_1$Y_hat,
+  model2 = Pred_Model_2$Y_hat,
+  model3 = Pred_Model_3$Y_hat,
+  model4 = Pred_Model_4$Y_hat,
+  model5 = Pred_Model_5$Y_hat
+)
+
+for (i in 1:5) {
+  metrics <- compute_r2_rmse(Y, model_preds[[i]])
+  title_txt <- paste0(
+    "Model ", i,
+    " -> R² = ", round(metrics$R_squared, 4),
+    ", RMSE = ", round(metrics$RMSE, 4)
+  )
+  print(title_txt)
+
+}
+```
+
+
+
+# Task 2.7 splitting data into training and testing dataset and calculating estamation based on training dataset
+
+#also plotting normal distribution graph of training data
+
+```{r}
+
+full_df <- data.frame(Y = Y, X_scaled)   # keeps X and Y aligned
+
+
+## 70/30 train–test split 
+
+set.seed(123)
+split <- initial_split(full_df, prop = 0.70)
+
+train <- training(split)
+test  <- testing(split)
+
+
+## Build Model-2 design matrices
+
+make_X <- function(df) cbind(1, df$x4, df$x3^2, df$x5)
+
+X_tr <- make_X(train);  y_tr <- as.matrix(train$Y)
+X_te <- make_X(test);   y_te <- as.matrix(test$Y)
+
+
+# Closed-form OLS  β̂ = (XᵀX)⁻¹ Xᵀy
+XtX_inv  <- solve(t(X_tr) %*% X_tr)      # (XᵀX)⁻¹
+theta_hat <- XtX_inv %*% t(X_tr) %*% y_tr # coefficients
+
+
+## Predictions & basic accuracy metrics 
+
+y_hat_tr <- X_tr %*% theta_hat
+y_hat_te <- X_te %*% theta_hat
+
+rmse <- function(a, p) sqrt(mean((a - p)^2))
+r2   <- function(a, p) 1 - sum((a - p)^2) / sum((a - mean(a))^2)
+
+cat("Train : R² =", round(r2(y_tr, y_hat_tr), 4),
+    " RMSE =", round(rmse(y_tr, y_hat_tr), 4), "\n")
+cat("Test  : R² =", round(r2(y_te, y_hat_te), 4),
+    " RMSE =", round(rmse(y_te, y_hat_te), 4), "\n")
+
+# 95 % global prediction interval (simple ±1.96 σ)
+sigma  <- rmse(y_tr, y_hat_tr)
+z      <- 1.96
+pi_low <- y_hat_te - z * sigma
+pi_up  <- y_hat_te + z * sigma
+
+
+## Residual diagnostics
+
+#residual RSS
+rss <- function(actual, pred) sum((actual - pred)^2)
+
+RSS_train <- rss(y_tr, y_hat_tr)
+RSS_test  <- rss(y_te, y_hat_te)
+
+cat("Train : RSS =", round(RSS_train, 4), "\n")
+cat("Test  : RSS =", round(RSS_test, 4),  "\n")
+
+par(mfrow = c(1, 2))
+
+## Q-Q plot
+qqnorm(scale(y_tr - y_hat_tr), main = "Q-Q plot (train residuals)")
+qqline(scale(y_tr - y_hat_tr))
+
+## Density of residuals
+plot(density(y_tr - y_hat_tr), main = "Density of train residuals",
+     xlab = "Residual", lwd = 2)
+
+par(mfrow = c(1, 1))
+
+
+# One-sample t-test & Y-distribution visuals 
+
+tt <- t.test(y_tr, mu = 500)
+print(tt)
+
+par(mfrow = c(1, 2))
+
+## Histogram with normal curve
+hist(y_tr, breaks = 20, col = "skyblue",
+     main = "Histogram of Y (train)", xlab = "Y")
+curve(dnorm(x, mean(y_tr), sd(y_tr)) * length(y_tr) *
+      diff(hist(y_tr, plot = FALSE)$breaks)[1],
+      add = TRUE, lwd = 2)
+
+## Kernel density
+plot(density(y_tr), main = "Kernel density of Y (train)",
+     xlab = "Y", lwd = 2)
+rug(y_tr)
+
+par(mfrow = c(1, 1))
+
+
+# Print first few predictions + 95 % band
+head(data.frame(actual = y_te,
+                pred   = y_hat_te,
+                lower95 = pi_low,
+                upper95 = pi_up))
+
+
+```
+
+
+#Task 3
+
+```{r}
+## Model 2 will be used, parameter are selected and kept constant.
+
+# Extract thetahat components from Model 2
+thetebias   <- Model2_thetahat[1]  # Intercept (theta_0)
+thetaone    <- Model2_thetahat[2]  # Coefficient for x4 (theta_1)
+thetatwo    <- Model2_thetahat[3]  # Coefficient for x3^2 (theta_2)
+thetathree  <- Model2_thetahat[4]  # Coefficient for x5 (theta_3)
+
+# Compute baseline RSS for epsilon
+RSS_Model_2 <- sum((Y - X_model2 %*% Model2_thetahat)^2)
+Epison <- RSS_Model_2 * 2  # Threshold for acceptance
+
+# ABC rejection sampling
+num <- 15000
+arr_1 <- numeric(num)
+arr_2 <- numeric(num)
+counter <- 0
+
+for (i in 1:num) {
+  range1 <- runif(1, thetebias * 0.8, thetebias * 1.2)
+  range2 <- runif(1, thetaone * 0.8, thetaone * 1.2)
+  New_thetahat <- matrix(c(range1, range2, thetatwo, thetathree), ncol = 1)
+  New_Y_Hat <- X_model2 %*% New_thetahat
+  new_RSS <- sum((Y - New_Y_Hat)^2)
+  
+  if (new_RSS < Epison) {
+    counter <- counter + 1
+    arr_1[counter] <- range1
+    arr_2[counter] <- range2
+  }
+}
+
+# Store accepted values
+f_value <- arr_1[1:counter]
+s_value <- arr_2[1:counter]
+
+# Plot posterior histograms
+hist(f_value)
+hist(s_value)
+#hist(f_value, main = "Posterior of theta_0 (bias)", col = "lightblue", xlab = "theta_0")
+#hist(s_value, main = "Posterior of theta_1 (x4 coefficient)", col = "lightgreen", xlab = "theta_1")
+
+# Joint posterior scatterplot
+#plot(f_value, s_value, col = rgb(0.2, 0.4, 0.6, 0.5), pch = 19,
+#     main = "Joint Posterior of theta_0 and theta_1",
+#     xlab = "theta_0 (bias)", ylab = "theta_1 (x4 coefficient)")
+
+###ploting Joint and Marginal Posterior Distribution of the graph
+plot(f_value,s_value, col = c("brown", "blue"), main = "Joint and Marginal Posterior Distribution")
+par(mfrow=c(1,1))
+
+```
+
+
