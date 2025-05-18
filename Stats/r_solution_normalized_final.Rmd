@@ -34,6 +34,7 @@ data <- cbind(time = 1:nrow(data), data)
 head(data)
 ```
 
+# Task `1
 # Begin EDA with time series plot
 
 ```{r}
@@ -576,9 +577,7 @@ for (i in 1:5) {
 
 
 
-# Task 2.7 splitting data into training and testing dataset and calculating estamation based on training dataset
-
-#also plotting normal distribution graph of training data
+# Task 2.7 splitting data into training and testing dataset and calculating estimation based on training dataset and plotting normal distribution graph of training data
 
 ```{r}
 
